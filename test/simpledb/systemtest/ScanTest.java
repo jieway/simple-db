@@ -89,7 +89,7 @@ public class ScanTest extends SimpleDbTestBase {
                 return super.readPage(pid);
             }
 
-            public int readCount = 0;
+            public int  readCount = 0;
         }
 
         // Create the table
