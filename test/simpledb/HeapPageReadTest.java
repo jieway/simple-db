@@ -60,7 +60,8 @@ public class HeapPageReadTest extends SimpleDbTestBase {
         try {
             File temp = File.createTempFile("table", ".dat");
             temp.deleteOnExit();
-            HeapFileEncoder.convert(table, temp, BufferPool.getPageSize(), 2);
+            HeapFileEncoder.convert(table, temp,
+                    BufferPool.getPageSize(), 2);
             EXAMPLE_DATA = TestUtil.readFileBytes(temp.getAbsolutePath());
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -72,7 +73,8 @@ public class HeapPageReadTest extends SimpleDbTestBase {
      */
     @Before public void addTable() {
         this.pid = new HeapPageId(-1, -1);
-        Database.getCatalog().addTable(new SkeletonFile(-1, Utility.getTupleDesc(2)), SystemTestUtil.getUUID());
+        Database.getCatalog().addTable(new SkeletonFile(-1,
+                Utility.getTupleDesc(2)), SystemTestUtil.getUUID());
     }
 
     /**
