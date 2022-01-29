@@ -83,6 +83,8 @@ public class BufferPool {
         if (page == null) {
             DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
             page = file.readPage(pid);
+            // cache
+            pages.put(pid , page);
         }
         return page;
     }
