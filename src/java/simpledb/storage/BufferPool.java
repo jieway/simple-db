@@ -38,8 +38,6 @@ public class BufferPool {
 
     private ConcurrentHashMap<PageId,Page> pages;
 
-    private ReadWriteLock rwLock;
-
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -81,13 +79,11 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        rwLock.readLock().lock();
         Page page = pages.get(pid);
         if (page == null) {
             DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
             page = file.readPage(pid);
         }
-        rwLock.readLock().unlock();
         return page;
     }
 
