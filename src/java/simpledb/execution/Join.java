@@ -114,8 +114,7 @@ public class Join extends Operator {
             if (childrens[1].hasNext()) {
                 Tuple tuple2 = childrens[1].next();
                 if (this.joinPredicate.filter(tuple, tuple2)) {
-                    Tuple res = new Tuple(TupleDesc.merge(tuple.getTupleDesc(),
-                            tuple2.getTupleDesc()));
+                    Tuple res = new Tuple(getTupleDesc());
                     for (int i = 0; i < (tuple.getTupleDesc().numFields() +
                             tuple2.getTupleDesc().numFields()); i ++ ) {
                         if (i < tuple.getTupleDesc().numFields()) {
