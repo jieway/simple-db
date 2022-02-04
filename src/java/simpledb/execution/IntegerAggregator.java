@@ -84,7 +84,7 @@ public class IntegerAggregator implements Aggregator {
                             ((IntField)tup.getField(aField)).getValue());
                     fieldCount.put(field , fieldCount.get(field) + 1);
                 }else if (this.what == Op.COUNT) {
-                    fieldCount.put(field , fieldSum.get(field) + 1);
+                    fieldSum.put(field, fieldSum.get(field) + 1);
                 }else if (this.what == Op.SUM) {
                     fieldSum.put(field , fieldSum.get(field) +
                             ((IntField)tup.getField(aField)).getValue());
@@ -100,7 +100,7 @@ public class IntegerAggregator implements Aggregator {
                     fieldSum.put(field , ((IntField)tup.getField(aField)).getValue());
                     fieldCount.put(field , 1);
                 }else if (this.what == Op.COUNT) {
-                    fieldCount.put(field ,  1);
+                    fieldSum.put(field ,  1);
                 }else if (this.what == Op.SUM) {
                     fieldSum.put(field , ((IntField)tup.getField(aField)).getValue());
                 }else if (this.what == Op.MAX) {
@@ -111,13 +111,14 @@ public class IntegerAggregator implements Aggregator {
             }
         }else {
             if (this.what == Op.AVG) {
-                count++;
+                count ++;
                 sum += ((IntField)tup.getField(aField)).getValue();
             }else if (this.what == Op.COUNT) {
                 count++;
                 sum++;
             }else if (this.what == Op.SUM) {
                 sum += ((IntField)tup.getField(aField)).getValue();
+                count ++;
             }else if (this.what == Op.MAX) {
                 int t = ((IntField)tup.getField(aField)).getValue();
                 if (count == 0) sum = t;
@@ -174,12 +175,12 @@ public class IntegerAggregator implements Aggregator {
 
             @Override
             public boolean hasNext() throws DbException, TransactionAbortedException {
-                if (gbField != Aggregator.NO_GROUPING) {
+                if (gbField != NO_GROUPING) {
                     if (iterator == null) throw new DbException("not yet open");
                     if (iterator.hasNext()) return true;
                     else return false;
-                }else {
-                    if (iterator == null) throw new DbException("not yet open");
+                } else {
+                    if (td == null) throw new DbException("not yet open");
                     return hasNext;
                 }
             }
