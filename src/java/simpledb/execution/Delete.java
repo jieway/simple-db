@@ -22,7 +22,6 @@ public class Delete extends Operator {
 
     private TransactionId     tid;
     private OpIterator        child;
-    private int               tableId;
     private TupleDesc         td;
     private boolean           isFetched;
 

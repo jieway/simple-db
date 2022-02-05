@@ -37,7 +37,7 @@ public class BufferPool {
 
     private int numPages;
 
-    private ConcurrentHashMap<PageId,Page> pages;
+    private  LRUCache<PageId, Page> lruCache;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -45,8 +45,7 @@ public class BufferPool {
      * @param numPages maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
-        this.numPages = numPages;
-        pages = new ConcurrentHashMap<>();
+        this.lruCache = new LRUCache<>(numPages);
     }
     
     public static int getPageSize() {
@@ -80,12 +79,16 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        Page page = pages.get(pid);
+        Page page = this.lruCache.get(pid);
+
+        // LRU 中没有那么就去 DbFile 取并更新该页的频率
         if (page == null) {
             DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
             page = file.readPage(pid);
-            // cache
-            pages.put(pid , page);
+            Page evictedPage = this.lruCache.put(pid, page);
+            if (evictedPage != null) {
+                flushPage(evictedPage);
+            }
         }
         return page;
     }
@@ -155,7 +158,7 @@ public class BufferPool {
         DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
         List<Page> pgs = dbFile.insertTuple(tid, t);
         for (Page page : pgs) {
-            pages.put(page.getId(), page);
+            this.lruCache.put(page.getId(), page);
             page.markDirty(true, tid);
         }
 
@@ -212,15 +215,24 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        this.lruCache.remove(pid);
     }
 
     /**
      * Flushes a certain page to disk
-     * @param pid an ID indicating the page to flush
+     * @param page an page to flush
      */
-    private synchronized  void flushPage(PageId pid) throws IOException {
+    private synchronized void flushPage(Page page) {
         // some code goes here
         // not necessary for lab1
+        try {
+            final DbFile tableFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
+            tableFile.writePage(page);
+            page.markDirty(false, null);
+        } catch (IOException e) {
+            // Todo: add logger
+            System.out.println("Error happen when flush page to disk:" + e.getMessage());
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
