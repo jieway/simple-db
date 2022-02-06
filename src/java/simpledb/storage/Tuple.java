@@ -88,8 +88,9 @@ public class Tuple implements Serializable {
      * where \t is any whitespace (except a newline)
      */
     public String toString() {
-        // some code goes here
-        throw new UnsupportedOperationException("Implement this");
+        String std = "TupleDesc : " + tupleDesc.toString();
+        String sfield = "Fields    : " + Arrays.toString(new List[]{fields});
+        return std + "\n" + sfield;
     }
 
     /**
@@ -106,6 +107,6 @@ public class Tuple implements Serializable {
      * */
     public void resetTupleDesc(TupleDesc td)
     {
-        // some code goes here
+        tupleDesc = td;
     }
 }
