@@ -1,22 +1,23 @@
 package simpledb.optimizer;
 
 import simpledb.common.Database;
+import simpledb.common.DbException;
 import simpledb.common.Type;
 import simpledb.execution.Predicate;
 import simpledb.execution.SeqScan;
 import simpledb.storage.*;
 import simpledb.transaction.Transaction;
+import simpledb.transaction.TransactionAbortedException;
+import simpledb.transaction.TransactionId;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
  * TableStats represents statistics (e.g., histograms) about base tables in a
- * query. 
- * 
+ * query.
+ *
  * This class is not needed in implementing lab1 and lab2.
  */
 public class TableStats {
@@ -32,7 +33,7 @@ public class TableStats {
     public static void setTableStats(String tablename, TableStats stats) {
         statsMap.put(tablename, stats);
     }
-    
+
     public static void setStatsMap(Map<String,TableStats> s)
     {
         try {
@@ -68,10 +69,16 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+    private int tableId;
+    private int ioCostPerPage;
+    private int totalTuples;
+    private final HeapFile table;
+    private final Map<Integer, IntHistogram> intHistogramMap;
+    private final Map<Integer, StringHistogram> stringHistogramMap;
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
-     * 
+     *
      * @param tableid
      *            The table over which to compute statistics
      * @param ioCostPerPage
@@ -87,29 +94,99 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+        this.tableId            = tableid;
+        this.ioCostPerPage      = ioCostPerPage;
+        this.table              = (HeapFile) Database.getCatalog().getDatabaseFile(tableid);
+        this.intHistogramMap    = new HashMap<>();
+        this.stringHistogramMap = new HashMap<>();
+        this.totalTuples        = 0;
+
+        // 为 table 的每一个字段构建直方图
+        buildHistogram();
+    }
+
+    private void buildHistogram() {
+        Map<Integer , ArrayList> fieldValues = fetchFieldValue(this.tableId);
+        for (int fieldId : fieldValues.keySet()) {
+            if (this.table.getTupleDesc().getFieldType(fieldId) == Type.INT_TYPE) {
+                List<Integer> values = fieldValues.get(fieldId);
+                int min = Collections.min(values);
+                int max = Collections.max(values);
+                IntHistogram histogram = new IntHistogram(NUM_HIST_BINS, min, max);
+                for (Integer val : values) {
+                    histogram.addValue(val);
+                }
+                this.intHistogramMap.put(fieldId, histogram);
+            }else if (this.table.getTupleDesc().getFieldType(fieldId) == Type.STRING_TYPE) {
+                final List<String> values = (ArrayList<String>) fieldValues.get(fieldId);
+                final StringHistogram histogram = new StringHistogram(NUM_HIST_BINS);
+                for (final String v : values) {
+                    histogram.addValue(v);
+                }
+                this.stringHistogramMap.put(fieldId, histogram);
+            }
+        }
+    }
+
+    // 一个 Field 一个 list
+    private Map<Integer, ArrayList> fetchFieldValue(int tableId) {
+        Map<Integer, ArrayList> fieldValueMap = new HashMap<>();
+        for (int i = 0; i < this.table.getTupleDesc().numFields(); i++) {
+            if (this.table.getTupleDesc().getFieldType(i) == Type.INT_TYPE) {
+                fieldValueMap.put(i , new ArrayList<Integer>());
+            }else if (this.table.getTupleDesc().getFieldType(i) == Type.STRING_TYPE){
+                fieldValueMap.put(i , new ArrayList<String>());
+            }
+        }
+        SeqScan seqScan = new SeqScan(new TransactionId() , tableId);
+
+        try {
+            seqScan.open();
+            while (seqScan.hasNext()) {
+                // 拿到一行数据
+                this.totalTuples++;
+                Tuple tuple = seqScan.next();
+                // 遍历并提取该行数据
+                for (int i = 0; i < this.table.getTupleDesc().numFields(); i++) {
+                    Field field = tuple.getField(i);
+                    if (field.getType() == Type.INT_TYPE) {
+                        int val = ((IntField) field).getValue();
+                        fieldValueMap.get(i).add(val);
+                    }else if (field.getType() == Type.STRING_TYPE) {
+                        String val = ((StringField) field).getValue();
+                        if (!Objects.equals(val, "")) {
+                            fieldValueMap.get(i).add(val);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return fieldValueMap;
     }
 
     /**
      * Estimates the cost of sequentially scanning the file, given that the cost
      * to read a page is costPerPageIO. You can assume that there are no seeks
      * and that no pages are in the buffer pool.
-     * 
+     *
      * Also, assume that your hard drive can only read entire pages at once, so
      * if the last page of the table only has one tuple on it, it's just as
      * expensive to read as a full page. (Most real hard drives can't
      * efficiently address regions smaller than a page at a time.)
-     * 
+     *
      * @return The estimated cost of scanning the table.
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return this.ioCostPerPage * this.table.numPages();
     }
 
     /**
      * This method returns the number of tuples in the relation, given that a
      * predicate with selectivity selectivityFactor is applied.
-     * 
+     *
      * @param selectivityFactor
      *            The selectivity of any predicates over the table
      * @return The estimated cardinality of the scan with the specified
@@ -117,7 +194,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return (int) (this.totalTuples * selectivityFactor);
     }
 
     /**
@@ -138,7 +215,7 @@ public class TableStats {
     /**
      * Estimate the selectivity of predicate <tt>field op constant</tt> on the
      * table.
-     * 
+     *
      * @param field
      *            The field over which the predicate ranges
      * @param op
@@ -149,8 +226,14 @@ public class TableStats {
      *         predicate
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
-        // some code goes here
-        return 1.0;
+        if (this.intHistogramMap.containsKey(field)) {
+            IntHistogram histogram = (IntHistogram) this.intHistogramMap.get(field);
+            return histogram.estimateSelectivity(op , (((IntField) constant).getValue()));
+        }else if (this.stringHistogramMap.containsKey(field)){
+            StringHistogram histogram = (StringHistogram) this.stringHistogramMap.get(field);
+            return histogram.estimateSelectivity(op, ((StringField) constant).getValue());
+        }
+        return 0;
     }
 
     /**
@@ -158,7 +241,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return this.totalTuples;
     }
 
 }
