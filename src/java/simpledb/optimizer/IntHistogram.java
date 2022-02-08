@@ -115,8 +115,11 @@ public class IntHistogram {
      * */
     public double avgSelectivity()
     {
-        // some code goes here
-        return 1.0;
+        int sum = 0;
+        for (int h : heights) {
+            sum += h;
+        }
+        return 1.0 * sum / this.totalTuples;
     }
 
     /**
