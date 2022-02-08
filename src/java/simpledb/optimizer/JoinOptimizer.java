@@ -21,7 +21,7 @@ public class JoinOptimizer {
 
     /**
      * Constructor
-     * 
+     *
      * @param p
      *            the logical plan being optimized
      * @param joins
@@ -39,7 +39,7 @@ public class JoinOptimizer {
      * inner/outer here -- because OpIterator's don't provide any cardinality
      * estimates, and stats only has information about the base tables. For this
      * reason, the plan1
-     * 
+     *
      * @param lj
      *            The join being considered
      * @param plan1
@@ -95,14 +95,14 @@ public class JoinOptimizer {
 
     /**
      * Estimate the cost of a join.
-     * 
+     *
      * The cost of the join should be calculated based on the join algorithm (or
      * algorithms) that you implemented for Lab 2. It should be a function of
      * the amount of data that must be read over the course of the query, as
      * well as the number of CPU opertions performed by your join. Assume that
      * the cost of a single predicate application is roughly 1.
-     * 
-     * 
+     *
+     *
      * @param j
      *            A LogicalJoinNode representing the join operation being
      *            performed.
@@ -139,7 +139,7 @@ public class JoinOptimizer {
     /**
      * Estimate the cardinality of a join. The cardinality of a join is the
      * number of tuples produced by the join.
-     * 
+     *
      * @param j
      *            A LogicalJoinNode representing the join operation being
      *            performed.
@@ -193,7 +193,7 @@ public class JoinOptimizer {
                 break;
             }
             default: {
-                card = card1 * card2 / 3;
+                card = (int) (card1 * card2 * 0.3);
             }
         }
         return card <= 0 ? 1 : card;
@@ -202,7 +202,7 @@ public class JoinOptimizer {
     /**
      * Helper method to enumerate all of the subsets of a given size of a
      * specified vector.
-     * 
+     *
      * @param v
      *            The vector whose subsets are desired
      * @param size
@@ -211,30 +211,26 @@ public class JoinOptimizer {
      */
     public <T> Set<Set<T>> enumerateSubsets(List<T> v, int size) {
         Set<Set<T>> els = new HashSet<>();
-        els.add(new HashSet<>());
-        // Iterator<Set> it;
-        // long start = System.currentTimeMillis();
-
-        for (int i = 0; i < size; i++) {
-            Set<Set<T>> newels = new HashSet<>();
-            for (Set<T> s : els) {
-                for (T t : v) {
-                    Set<T> news = new HashSet<>(s);
-                    if (news.add(t))
-                        newels.add(news);
-                }
-            }
-            els = newels;
-        }
-
+        dfs(v, size,0, els, new ArrayDeque<>());
         return els;
-
     }
+
+    private <T> void dfs(List<T> list, int size, int begin, Set<Set<T>> res, Deque<T> path) {
+        if (path.size() == size) {
+            res.add(new HashSet<>(path));
+        }
+        for (int i = begin; i < list.size(); i++) {
+            path.addLast(list.get(i));
+            dfs(list, size, i + 1, res, path);
+            path.removeLast();
+        }
+    }
+
 
     /**
      * Compute a logical, reasonably efficient join on the specified tables. See
      * PS4 for hints on how this should be implemented.
-     * 
+     *
      * @param stats
      *            Statistics for each table involved in the join, referenced by
      *            base table names, not alias
@@ -255,10 +251,43 @@ public class JoinOptimizer {
             Map<String, TableStats> stats,
             Map<String, Double> filterSelectivities, boolean explain)
             throws ParsingException {
-
         // some code goes here
         //Replace the following
-        return joins;
+
+        // 用来缓存 Selinger 实现中所考虑的连接子集的最佳方式
+        PlanCache pc = new PlanCache();
+        CostCard costCard = new CostCard();
+
+        for (int i = 1; i <= this.joins.size(); i++) {
+            // 去重的全排列
+            Set<Set<LogicalJoinNode>> subsets = enumerateSubsets(this.joins , i);
+//            System.out.println("全排列！！！");
+//            System.out.println(subsets.toString());
+            //         a b c
+            // i=1:   ab ac bc
+            // i=2:     abc
+            for (Set<LogicalJoinNode> subPlan : subsets) {
+                double bestCost = Double.MAX_VALUE;
+                // 计算其中一种组合的开销，例如 abc 的开销，遍历 ab c (假设之前 ab 是最优)
+                for (LogicalJoinNode removeNode : subPlan) {
+                    CostCard cc = computeCostAndCardOfSubplan(stats, filterSelectivities,
+                            removeNode, subPlan, bestCost, pc);
+                    if (cc != null) {
+                        bestCost = cc.cost;
+                        costCard = cc;
+                    }
+                }
+                // 保留当前层所有非空组合的开销
+                if (bestCost != Double.MAX_VALUE) {
+                    pc.addPlan(subPlan, bestCost, costCard.card, costCard.plan);
+                }
+            }
+        }
+        if (costCard != null) {
+            return costCard.plan;
+        } else {
+            return joins;
+        }
     }
 
     // ===================== Private Methods =================================
@@ -268,7 +297,7 @@ public class JoinOptimizer {
      * joinToRemove to joinSet (joinSet should contain joinToRemove), given that
      * all of the subsets of size joinSet.size() - 1 have already been computed
      * and stored in PlanCache pc.
-     * 
+     *
      * @param stats
      *            table stats for all of the tables, referenced by table names
      *            rather than alias (see {@link #orderJoins})
@@ -427,7 +456,7 @@ public class JoinOptimizer {
     /**
      * Return true if field is a primary key of the specified table, false
      * otherwise
-     * 
+     *
      * @param tableAlias
      *            The alias of the table in the query
      * @param field
@@ -458,7 +487,7 @@ public class JoinOptimizer {
      * Helper function to display a Swing window with a tree representation of
      * the specified list of joins. See {@link #orderJoins}, which may want to
      * call this when the analyze flag is true.
-     * 
+     *
      * @param js
      *            the join plan to visualize
      * @param pc
