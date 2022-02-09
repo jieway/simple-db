@@ -103,4 +103,21 @@ public class LRUCache<K, V> {
         return valueList.iterator();
     }
 
+    public synchronized Iterator<V> reverseIterator() {
+        Node last = this.tail.prev;
+        final ArrayList<V> list = new ArrayList<>();
+        while (!last.equals(this.head)) {
+            list.add(last.val);
+            last = last.prev;
+        }
+        return list.iterator();
+    }
+
+    public synchronized int getSize() {
+        return this.nodeMap.size();
+    }
+
+    public int getMaxSize() {
+        return maxSize;
+    }
 }

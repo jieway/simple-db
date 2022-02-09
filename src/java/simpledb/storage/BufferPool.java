@@ -4,12 +4,15 @@ import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
 import simpledb.common.DeadlockException;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReadWriteLock;
 
@@ -39,6 +42,7 @@ public class BufferPool {
 
     private  LRUCache<PageId, Page> lruCache;
 
+    private final LockManager lockManager;
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -46,6 +50,7 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         this.lruCache = new LRUCache<>(numPages);
+        this.lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -79,17 +84,31 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        Page page = this.lruCache.get(pid);
 
-        // LRU 中没有那么就去 DbFile 取并更新该页的频率
-        if (page == null) {
-            DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
-            page = file.readPage(pid);
-            Page evictedPage = this.lruCache.put(pid, page);
-            if (evictedPage != null) {
-                flushPage(evictedPage);
-            }
+        // 先上锁
+        int lockType = perm == Permissions.READ_ONLY ? 0 : 1;
+        int timeout  = new Random().nextInt(2000) + 1000;
+        if (!this.lockManager.tryAcquireLock(pid , tid, lockType, timeout)) {
+            throw new TransactionAbortedException();
         }
+        // 先看缓存中有没有
+        Page page = this.lruCache.get(pid);
+        if (page != null) {
+            return page;
+        }
+        // 缓存中没有就从磁盘中获取
+        return loadPageAndCache(pid);
+    }
+
+    private Page loadPageAndCache(PageId pid) throws DbException {
+        // 缓存中没有那么就去 DbFile 取并存入缓存中，然后更新该页的优先级
+        DbFile file = Database.getCatalog().getDatabaseFile(pid.getTableId());
+        Page page = file.readPage(pid);
+        // 将新 page 加入缓存中，如果缓存空间不够
+        if (this.lruCache.getSize() == this.lruCache.getMaxSize()) {
+            evictPage();
+        }
+        this.lruCache.put(pid, page);
         return page;
     }
 
@@ -105,6 +124,7 @@ public class BufferPool {
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        this.lockManager.releaseLock(pid, tid);
     }
 
     /**
@@ -115,13 +135,14 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid) {
         // some code goes here
         // not necessary for lab1|lab2
+
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        return this.lockManager.holdsLock(p, tid);
     }
 
     /**
@@ -134,8 +155,37 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        try {
+            if (commit) {
+                // 将所有页面写入磁盘
+                flushPages(tid);
+            } else {
+                // 重新加载所有页
+                reLoadPages(tid);
+            }
+            // 最后, 释放持有的锁
+            this.lockManager.releaseLockByTxn(tid);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
+    /**
+     *  ReLoad all pages of the specified transaction from disk.
+     *  @param tid the ID of the transaction requesting the unlock
+     */
+    public synchronized void reLoadPages(TransactionId tid) throws IOException, DbException {
+        // some code goes here
+        // not necessary for lab1|lab2
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while (pageIterator.hasNext()) {
+            final Page page = pageIterator.next();
+            if (page.isDirty() == tid) {
+                discardPage(page.getId());
+                loadPageAndCache(page.getId());
+            }
+        }
+    }
     /**
      * Add a tuple to the specified table on behalf of transaction tid.  Will
      * acquire a write lock on the page the tuple is added to and any other 
@@ -240,6 +290,13 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while (pageIterator.hasNext()) {
+            final Page page = pageIterator.next();
+            if (page.isDirty() == tid) {
+                flushPage(page);
+            }
+        }
     }
 
     /**
@@ -249,6 +306,15 @@ public class BufferPool {
     private synchronized  void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
+        Iterator<Page> pageIterator = this.lruCache.reverseIterator();
+        while (pageIterator.hasNext()) {
+            Page page = pageIterator.next();
+            if (page.isDirty() == null) {
+                discardPage(page.getId());
+                return;
+            }
+        }
+        throw new DbException("All pages are dirty in buffer pool");
     }
 
 }
