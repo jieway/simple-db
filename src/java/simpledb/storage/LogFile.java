@@ -460,6 +460,38 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                // 根据 tidToFirstLogRecord 获取该事务第一条记录的位置
+                Long firstRecordPos = this.tidToFirstLogRecord.get(tid.getId());
+                // 移动到日志开始的位置
+                this.raf.seek(firstRecordPos);
+                HashSet<PageId> set = new HashSet<>();
+                while (true) {
+                    // 读取日志类型
+                    int type = this.raf.readInt();
+                    // 读取 tid
+                    long transactionId = this.raf.readLong();
+                    // 读取 page data
+                    readPageData(this.raf);
+                    // 如果是 update 根据 tid 判断是否 rollback
+                    if (type == UPDATE_RECORD) {
+                        Page beginPage = readPageData(this.raf);
+                        readPageData(this.raf);
+                        PageId pageId = beginPage.getId();
+                        if (transactionId == tid.getId() && !set.contains(pageId)) {
+                            set.add(pageId);
+                            // 重写
+                            Database.getBufferPool().discardPage(beginPage.getId());
+                            Database.getCatalog().getDatabaseFile(pageId.getTableId()).writePage(beginPage);
+                        }
+                    }else if (type == CHECKPOINT_RECORD) {
+                        // 跳过
+                        int txnCnt = this.raf.readInt();
+                        int skip = txnCnt * 2 * 8;
+                        this.raf.skipBytes(skip);
+                        break;
+                    }
+                }
+                this.raf.readLong();
             }
         }
     }
@@ -487,6 +519,61 @@ public class LogFile {
             synchronized (this) {
                 recoveryUndecided = false;
                 // some code goes here
+                this.raf.seek(0);
+                long cp = raf.readLong();
+                if (cp > 0) {
+                    this.raf.seek(cp);
+                }
+                HashSet<Long> commitIds = new HashSet<>();
+                HashMap<Long, List<Page>> beforePages = new HashMap<>();
+                HashMap<Long, List<Page>> afterPages = new HashMap<>();
+                while (true) {
+                    try {
+                        int type = this.raf.readInt();
+                        long tid = this.raf.readLong();
+                        if (type == UPDATE_RECORD) {
+                            Page beforePage = readPageData(raf);
+                            Page afterPage = readPageData(raf);
+                            List<Page> beforeList = beforePages.getOrDefault(tid, new ArrayList<>());
+                            beforeList.add(beforePage);
+
+                            List<Page> afterList = afterPages.getOrDefault(tid, new ArrayList<>());
+                            afterList.add(afterPage);
+                        }else if (type == COMMIT_RECORD){
+                            commitIds.add(tid);
+                        }else if (type == CHECKPOINT_RECORD) {
+                            final int txnCnt = this.raf.readInt();
+                            final int skip = txnCnt * 2 * 8;
+                            this.raf.skipBytes(skip);
+                        }
+                    } catch (final EOFException e) {
+                        break;
+                    }
+                }
+
+                // Roll back unCommitted txn
+                beforePages.forEach((tid, pages) -> {
+                    if (!commitIds.contains(tid)) {
+                        for (final Page page : pages) {
+                            try {
+                                Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                });
+
+                // Write commit pages
+                for (final Long commitId : commitIds) {
+                    if (afterPages.containsKey(commitId)) {
+                        final List<Page> pages = afterPages.get(commitId);
+                        for (final Page page : pages) {
+                            Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        }
+                    }
+                }
+
             }
          }
     }

@@ -276,7 +276,13 @@ public class BufferPool {
         // some code goes here
         // not necessary for lab1
         try {
-            final DbFile tableFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
+            // 向日志系统中写入更新
+            TransactionId dirtier = page.isDirty();
+            if (dirtier != null){
+                Database.getLogFile().logWrite(dirtier, page.getBeforeImage(), page);
+                Database.getLogFile().force();
+            }
+            DbFile tableFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
             tableFile.writePage(page);
             page.markDirty(false, null);
         } catch (IOException e) {
